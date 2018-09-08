@@ -102,10 +102,10 @@ class Transaction {
   // For logging an verification.
   uint16_t access_size() const { return access_size_; }
   uint16_t iset_size() const { return iset_size_; }
-  uint16_t rset_size() const { return rset_size_; }
+  //uint16_t rset_size() const { return rset_size_; }
   uint16_t wset_size() const { return wset_size_; }
   const uint16_t* iset_idx() const { return iset_idx_; }
-  const uint16_t* rset_idx() const { return rset_idx_; }
+  //const uint16_t* rset_idx() const { return rset_idx_; }
   const uint16_t* wset_idx() const { return wset_idx_; }
   const RowAccessItem<StaticConfig>* accesses() const { return accesses_; }
 
@@ -129,7 +129,7 @@ class Transaction {
   Timestamp generate_timestamp();
   void sort_wset();
   bool check_version();
-  void update_rts();
+  //void update_rts();
   void write();
 
   void maintenance();
@@ -144,7 +144,7 @@ class Transaction {
 
   uint16_t access_size_;
   uint16_t iset_size_;
-  uint16_t rset_size_;
+  //uint16_t rset_size_;
   uint16_t wset_size_;
 
   uint8_t consecutive_commits_;
@@ -161,7 +161,7 @@ class Transaction {
 
   RowAccessItem<StaticConfig> accesses_[StaticConfig::kMaxAccessSize];
   uint16_t iset_idx_[StaticConfig::kMaxAccessSize];
-  uint16_t rset_idx_[StaticConfig::kMaxAccessSize];
+  //uint16_t rset_idx_[StaticConfig::kMaxAccessSize];
   uint16_t wset_idx_[StaticConfig::kMaxAccessSize];
 
   struct AccessBucket {

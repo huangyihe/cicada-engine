@@ -284,7 +284,14 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
                              newer_rv,
                              nullptr,
                              rv /*, latest_wts */};
-  access_size_++;
+
+  // Yihe: We don't update access_size here.
+  // We only do it in write_row(), because we don't want to track read set
+  // items. For peeks that doesn't involve a explicit read or write, peek_row()
+  // with "peek-only" row access handlers should be called (defined below),
+  // which doesn't allocate any items in the access set (so should be fine).
+
+  //access_size_++;
 
   return true;
 }
@@ -375,7 +382,11 @@ bool Transaction<StaticConfig>::read_row(RAH& rah,
   if (item->state != RowAccessState::kPeek) return false;
 
   item->state = RowAccessState::kRead;
-  rset_idx_[rset_size_++] = item->i;
+
+  // Yihe: Update rts here early
+  item->read_rv->rts.update(ts_);
+
+  //rset_idx_[rset_size_++] = item->i;
 
   if (StaticConfig::kInlinedRowVersion &&
       StaticConfig::kPromoteNonInlinedVersion &&
@@ -402,6 +413,8 @@ bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
   if (!rah) return false;
 
   assert(!peek_only_);
+  // Yihe: Bump up access set size. The access set is just the write set now.
+  access_size_++;
 
   Timing t(ctx_->timing_stack(), &Stats::execution_write);
 

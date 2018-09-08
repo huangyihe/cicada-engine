@@ -72,7 +72,7 @@ bool Transaction<StaticConfig>::begin(bool peek_only,
 
   access_size_ = 0;
   iset_size_ = 0;
-  rset_size_ = 0;
+  //rset_size_ = 0;
   wset_size_ = 0;
 
   access_bucket_count_ = 0;
@@ -174,15 +174,15 @@ bool Transaction<StaticConfig>::check_version() {
   return true;
 }
 
-template <class StaticConfig>
-void Transaction<StaticConfig>::update_rts() {
-  for (auto j = 0; j < rset_size_; j++) {
-    auto i = rset_idx_[j];
-    auto item = &accesses_[i];
-
-    item->read_rv->rts.update(ts_);
-  }
-}
+//template <class StaticConfig>
+//void Transaction<StaticConfig>::update_rts() {
+//  for (auto j = 0; j < rset_size_; j++) {
+//    auto i = rset_idx_[j];
+//    auto item = &accesses_[i];
+//
+//    item->read_rv->rts.update(ts_);
+//  }
+//}
 
 template <class StaticConfig>
 void Transaction<StaticConfig>::write() {
@@ -318,11 +318,11 @@ bool Transaction<StaticConfig>::commit(Result* detail,
     }
   }
 
-  {
-    t.switch_to(&Stats::rts_update);
-    if (StaticConfig::kVerbose) printf("rts_update: ts=%" PRIu64 "\n", ts_.t2);
-    update_rts();
-  }
+//  {
+//    t.switch_to(&Stats::rts_update);
+//    if (StaticConfig::kVerbose) printf("rts_update: ts=%" PRIu64 "\n", ts_.t2);
+//    update_rts();
+//  }
 
   {
     t.switch_to(&Stats::main_validation);
