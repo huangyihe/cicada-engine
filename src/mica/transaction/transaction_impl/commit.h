@@ -135,6 +135,10 @@ bool Transaction<StaticConfig>::check_version() {
   for (auto i = 0; i < access_size_; i++) {
     auto item = &accesses_[i];
 
+    // Yihe: added this assert to make sure we are not doing anything crazy.
+    // pure reads should never be in the access set now
+    assert(item->state != RowAccessState::kRead);
+
     // These states do not need any validation.
     if (item->state == RowAccessState::kInvalid ||
         item->state == RowAccessState::kNew ||
@@ -318,11 +322,12 @@ bool Transaction<StaticConfig>::commit(Result* detail,
     }
   }
 
-//  {
-//    t.switch_to(&Stats::rts_update);
-//    if (StaticConfig::kVerbose) printf("rts_update: ts=%" PRIu64 "\n", ts_.t2);
-//    update_rts();
-//  }
+  // Yihe: Skip
+  //{
+  //  t.switch_to(&Stats::rts_update);
+  //  if (StaticConfig::kVerbose) printf("rts_update: ts=%" PRIu64 "\n", ts_.t2);
+  //  update_rts();
+  //}
 
   {
     t.switch_to(&Stats::main_validation);

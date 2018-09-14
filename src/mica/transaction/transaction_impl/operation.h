@@ -121,6 +121,7 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
                              tbl,          cf_id, row_id,
                              head,         head,  write_rv,
                              nullptr /*, ts_*/};
+
   access_size_++;
 
   return true;
@@ -413,12 +414,18 @@ bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
   if (!rah) return false;
 
   assert(!peek_only_);
-  // Yihe: Bump up access set size. The access set is just the write set now.
-  access_size_++;
-
   Timing t(ctx_->timing_stack(), &Stats::execution_write);
 
   auto item = rah.access_item_;
+
+  if (item == &accesses_[access_size_]) {
+    // Yihe: Bump up access set size. The access set is just the write set now.
+    // Bump it up only if the item we are talking about (rah.access_item) is
+    // currently one-past-the-end of the last access set item.
+    // This is to prevent double-bump-ups due to a read (in RMW) get promoted into
+    // a write.
+    access_size_++;
+  }
 
   // New rows are writable by default.
   if (item->state == RowAccessState::kNew) return true;
@@ -579,7 +586,10 @@ void Transaction<StaticConfig>::locate(RowCommon<StaticConfig>*& newer_rv,
   if (ForWrite) {
     // Someone have read this row, preventing this row from being overwritten.
     // Thus, abort this transaction.
-    if (rv != nullptr && rv->rts.get() > ts_) rv = nullptr;
+    if (rv != nullptr && rv->rts.get() > ts_) {
+      //printf("Transaction::locate(): write can't overwrite read\n");
+      rv = nullptr;
+    }
   }
 
   if (StaticConfig::kCollectProcessingStats) {
