@@ -116,7 +116,9 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
     assert(false);
   }
   iset_idx_[iset_size_++] = access_size_;
-  rah.access_item_ = &accesses_[access_size_];
+
+  rah.valid_ = true;
+  rah.set_item_ = &accesses_[access_size_];
   accesses_[access_size_] = {access_size_, 0,     RowAccessState::kNew,
                              tbl,          cf_id, row_id,
                              head,         head,  write_rv,
@@ -184,7 +186,7 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
         auto item = &accesses_[bkt->idx[i]];
         if (item->row_id == row_id && item->tbl == tbl &&
             item->cf_id == cf_id) {
-          rah.access_item_ = item;
+          rah.add_set_item(accesses_, bkt->idx[i]);
           return true;
         }
       }
@@ -246,53 +248,22 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
 
   // if (head_older != rv) using_latest_only_ = 0;
 
-  // assert(access_size_ < StaticConfig::kMaxAccessSize);
-  if (access_size_ >= StaticConfig::kMaxAccessSize) {
-    printf("too large access\n");
-    assert(false);
-  }
-  rah.access_item_ = &accesses_[access_size_];
+  rah.add_fresh_item({access_size_,
+                      0,
+                      RowAccessState::kPeek,
+                      tbl,
+                      cf_id,
+                      row_id,
+                      head,
+                      newer_rv,
+                      nullptr,
+                      rv /*, latest_wts */});
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-  if (check_dup_access) {
-    if (bkt->count == StaticConfig::kAccessBucketSize) {
-      // Allocate a new acccess bucket if needed.
-      auto new_bkt_id = access_bucket_count_++;
-      if (access_buckets_.size() < access_bucket_count_)
-        access_buckets_.resize(access_bucket_count_);
-      auto new_bkt = &access_buckets_[new_bkt_id];
-      new_bkt->count = 0;
-      new_bkt->next = AccessBucket::kEmptyBucketID;
-
-      // We must refresh bkt pointer because std::vector's resize() can move
-      // the buffer.
-      bkt = &access_buckets_[bkt_id];
-      bkt->next = new_bkt_id;
-      bkt = new_bkt;
-    }
-    bkt->idx[bkt->count++] = access_size_;
-  }
-#pragma GCC diagnostic pop
-
-  accesses_[access_size_] = {access_size_,
-                             0,
-                             RowAccessState::kPeek,
-                             tbl,
-                             cf_id,
-                             row_id,
-                             head,
-                             newer_rv,
-                             nullptr,
-                             rv /*, latest_wts */};
-
-  // Yihe: We don't update access_size here.
+  // Yihe: We don't update access set at all here.
   // We only do it in write_row(), because we don't want to track read set
   // items. For peeks that doesn't involve a explicit read or write, peek_row()
   // with "peek-only" row access handlers should be called (defined below),
   // which doesn't allocate any items in the access set (so should be fine).
-
-  //access_size_++;
 
   return true;
 }
@@ -371,7 +342,7 @@ bool Transaction<StaticConfig>::read_row(RAH& rah,
 
   Timing t(ctx_->timing_stack(), &Stats::execution_read);
 
-  auto item = rah.access_item_;
+  auto item = &rah.item();
 
   // New rows are readable by default.
   if (item->state == RowAccessState::kNew) return true;
@@ -399,7 +370,7 @@ bool Transaction<StaticConfig>::read_row(RAH& rah,
       // Promote a version if (1) it is a non-inlined version, (2) the inlined
       // version is not in use, (3) this non-inlined version was created for a
       // while ago.
-      return write_row(rah, kDefaultWriteDataSize, data_copier);
+      return write_row(rah, kDefaultWriteDataSize, data_copier, true);
     }
   }
 
@@ -409,23 +380,52 @@ bool Transaction<StaticConfig>::read_row(RAH& rah,
 template <class StaticConfig>
 template <class DataCopier>
 bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
-                                          const DataCopier& data_copier) {
+                                          const DataCopier& data_copier,
+                                          bool check_dup_access) {
   assert(began_);
   if (!rah) return false;
 
   assert(!peek_only_);
+
   Timing t(ctx_->timing_stack(), &Stats::execution_write);
 
-  auto item = rah.access_item_;
+  auto item = &rah.item();
+  // Yihe: Add to access set (write set) if it's not added yet.
+  if (rah.set_item_ == nullptr) {
+    if (check_dup_access) {
+      uint16_t bkt_id = (reinterpret_cast<size_t>(item->tbl) / 64 + item->row_id)
+                        % StaticConfig::kAccessBucketRootCount;
+      AccessBucket* bkt = &access_buckets_[bkt_id];
 
-  if (item == &accesses_[access_size_]) {
-    // Yihe: Bump up access set size. The access set is just the write set now.
-    // Bump it up only if the item we are talking about (rah.access_item) is
-    // currently one-past-the-end of the last access set item.
-    // This is to prevent double-bump-ups due to a read (in RMW) get promoted into
-    // a write.
+      if (bkt->count == StaticConfig::kAccessBucketSize) {
+        // Allocate a new acccess bucket if needed.
+        auto new_bkt_id = access_bucket_count_++;
+        if (access_buckets_.size() < access_bucket_count_)
+          access_buckets_.resize(access_bucket_count_);
+        auto new_bkt = &access_buckets_[new_bkt_id];
+        new_bkt->count = 0;
+        new_bkt->next = AccessBucket::kEmptyBucketID;
+
+        // We must refresh bkt pointer because std::vector's resize() can move
+        // the buffer.
+        bkt = &access_buckets_[bkt_id];
+        bkt->next = new_bkt_id;
+        bkt = new_bkt;
+      }
+      bkt->idx[bkt->count++] = access_size_;
+    }
+
+    // assert(access_size_ < StaticConfig::kMaxAccessSize);
+    if (access_size_ >= StaticConfig::kMaxAccessSize) {
+      printf("too large access\n");
+      assert(false);
+    }
+
+    rah.add_item_to_set(accesses_, access_size_);
     access_size_++;
   }
+
+  item = &rah.item();
 
   // New rows are writable by default.
   if (item->state == RowAccessState::kNew) return true;
@@ -482,7 +482,7 @@ bool Transaction<StaticConfig>::delete_row(RAH& rah) {
 
   if (!rah) return false;
 
-  auto item = rah.access_item_;
+  auto item = &rah.item();
 
   switch (item->state) {
     case RowAccessState::kNew:
@@ -506,7 +506,7 @@ bool Transaction<StaticConfig>::delete_row(RAH& rah) {
       return false;
   }
 
-  rah.access_item_ = nullptr;
+  rah.reset();
 
   return true;
 }

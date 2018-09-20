@@ -79,7 +79,7 @@ class Transaction {
   template <class DataCopier>
   bool read_row(RAH& rah, const DataCopier& data_copier);
   template <class DataCopier>
-  bool write_row(RAH& rah, uint64_t data_size, const DataCopier& data_copier);
+  bool write_row(RAH& rah, uint64_t data_size, const DataCopier& data_copier, bool check_dup_access);
   bool delete_row(RAH& rah);
 
   // transaction_impl/commit.h

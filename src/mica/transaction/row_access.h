@@ -41,7 +41,26 @@ template <class StaticConfig>
 class Transaction;
 
 template <class StaticConfig>
-struct RowAccessItem;
+struct RowAccessItem {
+  // Invariant: newer_rv.wts > (write_rv.wts) > read_rv.wts.
+
+  uint16_t i;
+  uint8_t inserted;
+  RowAccessState state;
+
+  Table<StaticConfig>* tbl;
+  uint16_t cf_id;
+  uint64_t row_id;
+
+  RowHead<StaticConfig>* head;
+  RowCommon<StaticConfig>* newer_rv;
+  RowVersion<StaticConfig>* write_rv;
+  RowVersion<StaticConfig>* read_rv;
+
+  // typename StaticConfig::Timestamp latest_wts;
+
+  RowAccessItem& operator=(const RowAccessItem& o) = default;
+};
 
 template <class StaticConfig>
 class RowAccessHandle {
@@ -75,80 +94,134 @@ class RowAccessHandle {
       class DataCopier = typename Transaction<StaticConfig>::TrivialDataCopier>
   bool write_row(
       uint64_t data_size = Transaction<StaticConfig>::kDefaultWriteDataSize,
-      const DataCopier& data_copier = DataCopier()) {
-    return tx_->write_row(*this, data_size, data_copier);
+      const DataCopier& data_copier = DataCopier(), bool check_dup_access = true) {
+    return tx_->write_row(*this, data_size, data_copier, check_dup_access);
   }
   bool delete_row() { return tx_->delete_row(*this); }
 
   RowAccessState state() const {
     if (*this)
-      return access_item_->state;
+      return item().state;
     else
       return RowAccessState::kInvalid;
   }
-  operator bool() const { return access_item_ != nullptr; }
-  bool operator!() const { return access_item_ == nullptr; }
+  operator bool() const { return valid_; }
+  bool operator!() const { return !valid_; }
 
-  Table<StaticConfig>* table() { return access_item_->tbl; }
-  const Table<StaticConfig>* table() const { return access_item_->tbl; }
+  Table<StaticConfig>* table() { return item().tbl; }
+  const Table<StaticConfig>* table() const { return item().tbl; }
 
-  uint16_t cf_id() const { return access_item_->cf_id; }
+  uint16_t cf_id() const { return item().cf_id; }
 
-  uint64_t row_id() const { return access_item_->row_id; }
+  uint64_t row_id() const { return item().row_id; }
 
   bool can_read() const {
-    return access_item_->write_rv != nullptr ||
-           access_item_->read_rv != nullptr;
+    return item().write_rv != nullptr ||
+           item().read_rv != nullptr;
   }
-  bool can_write() const { return access_item_->write_rv != nullptr; }
+  bool can_write() const { return item().write_rv != nullptr; }
   bool is_deleted() const {
-    return access_item_ == nullptr || (access_item_->write_rv != nullptr &&
-                                       access_item_->write_rv->deleted) ||
-           (access_item_->read_rv != nullptr && access_item_->read_rv->deleted);
+    return (!valid_) || (item().write_rv != nullptr &&
+                                       item().write_rv->deleted) ||
+           (item().read_rv != nullptr && item().read_rv->deleted);
   }
 
   const char* cdata() const {
-    if (access_item_->write_rv != nullptr)
-      return access_item_->write_rv->data;
-    else if (access_item_->read_rv != nullptr)
-      return access_item_->read_rv->data;
+    if (item().write_rv != nullptr)
+      return item().write_rv->data;
+    else if (item().read_rv != nullptr)
+      return item().read_rv->data;
     else
       return nullptr;
   }
 
   char* data() {
-    if (access_item_->write_rv != nullptr)
-      return access_item_->write_rv->data;
+    if (item().write_rv != nullptr)
+      return item().write_rv->data;
     else
       return nullptr;
   }
 
-  uint64_t size() const { return access_item_->tbl->data_size(); }
+  uint64_t size() const { return item().tbl->data_size(); }
 
   uint64_t rv_size() const {
-    if (access_item_->write_rv != nullptr)
+    if (item().write_rv != nullptr)
       return SharedRowVersionPool<StaticConfig>::class_to_size(
-          access_item_->write_rv->size_cls);
-    else if (access_item_->read_rv != nullptr)
+          item().write_rv->size_cls);
+    else if (item().read_rv != nullptr)
       return SharedRowVersionPool<StaticConfig>::class_to_size(
-          access_item_->read_rv->size_cls);
+          item().read_rv->size_cls);
     else
       return 0;
   }
 
-  void reset() { access_item_ = nullptr; }
+  void reset() { valid_ = false; set_item_ = nullptr; }
 
-  RowAccessHandle() : access_item_(nullptr) {}
+  void add_fresh_item(RowAccessItem<StaticConfig>&& item) {
+    assert(!valid_ && (set_item_ == nullptr));
+    valid_ = true;
+    local_item_ = item;
+  }
+
+  void add_set_item(RowAccessItem<StaticConfig>* const tx_accesses, int index) {
+    assert(!valid_ && (set_item_ == nullptr));
+    valid_ = true;
+    set_item_ = &tx_accesses[index];
+    assert(index <= static_cast<int>(std::numeric_limits<uint16_t>::max()));
+    assert(set_item_->i == static_cast<uint16_t>(index));
+  }
+
+  void add_item_to_set(RowAccessItem<StaticConfig>* const tx_accesses, int index) {
+    assert(valid_ && (set_item_ == nullptr));
+    auto dst = &tx_accesses[index];
+    // Don't forget to set the actual index!!
+    assert(index <= static_cast<int>(std::numeric_limits<uint16_t>::max()));
+    local_item_.i = static_cast<uint16_t>(index);
+    *dst = local_item_;
+    set_item_ = dst;
+  }
+
+  const RowAccessItem<StaticConfig>& item() const {
+    assert(valid_);
+    if (set_item_ != nullptr) {
+      return *set_item_;
+    } else {
+      return local_item_;
+    }
+  }
+
+  RowAccessItem<StaticConfig>& item() {
+    assert(valid_);
+    if (set_item_ != nullptr) {
+      return *set_item_;
+    } else {
+      return local_item_;
+    }
+  }
+
+  RowAccessHandle()
+      : tx_(nullptr), valid_(false),
+        set_item_(nullptr), local_item_() {}
 
   explicit RowAccessHandle(Transaction<StaticConfig>* tx)
-      : tx_(tx), access_item_(nullptr) {}
+      : tx_(tx), valid_(false),
+        set_item_(nullptr), local_item_() {}
 
-  RowAccessHandle(const RowAccessHandle& o)
-      : tx_(o.tx_), access_item_(o.access_item_) {}
+  //RowAccessHandle(const RowAccessHandle& o)
+  //    : tx_(o.tx_), valid_(o.valid_),
+  //      set_item_(set_item_), local_item_() {
+  //    if (valid_ && (set_item_ == nullptr)) {
+  //      local_item_ = o.local_item_;
+  //    }
+  //}
 
   RowAccessHandle& operator=(const RowAccessHandle& o) {
     tx_ = o.tx_;
-    access_item_ = o.access_item_;
+    valid_ = o.valid_;
+    set_item_ = o.set_item_;
+    if (valid_ && (set_item_ == nullptr)) {
+      local_item_ = o.local_item_;
+    }
     return *this;
   }
 
@@ -156,8 +229,9 @@ class RowAccessHandle {
   friend Transaction<StaticConfig>;
 
   Transaction<StaticConfig>* tx_;
-
-  RowAccessItem<StaticConfig>* access_item_;
+  bool valid_;
+  RowAccessItem<StaticConfig>* set_item_;
+  RowAccessItem<StaticConfig> local_item_;
 };
 
 template <class StaticConfig>
@@ -199,9 +273,10 @@ class RowAccessHandlePeekOnly {
       class DataCopier = typename Transaction<StaticConfig>::TrivialDataCopier>
   bool write_row(
       uint64_t data_size = Transaction<StaticConfig>::kDefaultWriteDataSize,
-      const DataCopier& data_copier = DataCopier()) {
+      const DataCopier& data_copier = DataCopier(), bool check_dup_access = true) {
     (void)data_size;
     (void)data_copier;
+    (void)check_dup_access;
     return false;
   }
   bool delete_row() { return false; }
@@ -271,25 +346,6 @@ class RowAccessHandlePeekOnly {
   RowVersion<StaticConfig>* read_rv_;
 };
 
-template <class StaticConfig>
-struct RowAccessItem {
-  // Invariant: newer_rv.wts > (write_rv.wts) > read_rv.wts.
-
-  uint16_t i;
-  uint8_t inserted;
-  RowAccessState state;
-
-  Table<StaticConfig>* tbl;
-  uint16_t cf_id;
-  uint64_t row_id;
-
-  RowHead<StaticConfig>* head;
-  RowCommon<StaticConfig>* newer_rv;
-  RowVersion<StaticConfig>* write_rv;
-  RowVersion<StaticConfig>* read_rv;
-
-  // typename StaticConfig::Timestamp latest_wts;
-};
 }
 }
 
