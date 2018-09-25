@@ -70,44 +70,13 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
   //     __builtin_prefetch(reinterpret_cast<const void*>(addr), 1, 0);
   // }
 
-  uint16_t bkt_id;
-  AccessBucket* bkt;
   if (check_dup_access) {
-    // TODO: Factor this out because it is used later again.
-    if (access_bucket_count_ == 0) {
-      for (size_t i = 0; i < StaticConfig::kAccessBucketRootCount; i++) {
-        access_buckets_[i].count = 0;
-        access_buckets_[i].next = AccessBucket::kEmptyBucketID;
-      }
-      access_bucket_count_ = StaticConfig::kAccessBucketRootCount;
-    }
+    auto it = access_history_.find({tbl, row_id, cf_id});
+    // new rows must haven't been accessed before
+    assert(it == access_history_.end());
 
-    bkt_id = (reinterpret_cast<size_t>(tbl) / 64 + row_id) %
-             StaticConfig::kAccessBucketRootCount;
-    bkt = &access_buckets_[bkt_id];
-    while (true) {
-      if (bkt->next == AccessBucket::kEmptyBucketID) break;
-      bkt_id = bkt->next;
-      bkt = &access_buckets_[bkt_id];
-    }
-
-    if (bkt->count == StaticConfig::kAccessBucketSize) {
-      // Allocate a new acccess bucket if needed.
-      auto new_bkt_id = access_bucket_count_++;
-      if (access_buckets_.size() < access_bucket_count_)
-        access_buckets_.resize(access_bucket_count_);
-      auto new_bkt = &access_buckets_[new_bkt_id];
-      new_bkt->count = 0;
-      new_bkt->next = AccessBucket::kEmptyBucketID;
-
-      // We must refresh bkt pointer because std::vector's resize() can move
-      // the buffer.
-      bkt = &access_buckets_[bkt_id];
-      bkt->next = new_bkt_id;
-      bkt = new_bkt;
-    }
-    bkt->idx[bkt->count++] = access_size_;
-    // printf("check_dup %" PRIu64 "\n", row_id);
+    auto ins_res = access_history_.insert({{tbl, row_id, cf_id}, access_size_});
+    assert(ins_res.second);
   }
 
   // assert(access_size_ < StaticConfig::kMaxAccessSize);
@@ -167,32 +136,14 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
   Timing t(ctx_->timing_stack(), &Stats::execution_read);
 
   // Use an access item if it already exists.
-  uint16_t bkt_id;
-  AccessBucket* bkt;
   if (check_dup_access) {
-    if (access_bucket_count_ == 0) {
-      for (size_t i = 0; i < StaticConfig::kAccessBucketRootCount; i++) {
-        access_buckets_[i].count = 0;
-        access_buckets_[i].next = AccessBucket::kEmptyBucketID;
-      }
-      access_bucket_count_ = StaticConfig::kAccessBucketRootCount;
-    }
-
-    bkt_id = (reinterpret_cast<size_t>(tbl) / 64 + row_id) %
-             StaticConfig::kAccessBucketRootCount;
-    bkt = &access_buckets_[bkt_id];
-    while (true) {
-      for (auto i = 0; i < bkt->count; i++) {
-        auto item = &accesses_[bkt->idx[i]];
-        if (item->row_id == row_id && item->tbl == tbl &&
-            item->cf_id == cf_id) {
-          rah.add_set_item(accesses_, bkt->idx[i]);
-          return true;
-        }
-      }
-      if (bkt->next == AccessBucket::kEmptyBucketID) break;
-      bkt_id = bkt->next;
-      bkt = &access_buckets_[bkt_id];
+    auto it = access_history_.find({tbl, row_id, cf_id});
+    if (it != access_history_.end()) {
+        // found an access item, use it
+        int idx = it->second;
+        assert(idx < access_size_);
+        rah.add_set_item(accesses_, idx);
+        return true;
     }
   }
 
@@ -207,21 +158,9 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
   // auto head_older = rv;
   // auto latest_wts = rv->wts;
 
-  switch (static_cast<int>(read_hint) * 2 + static_cast<int>(write_hint)) {
-    default:
-    case 0:
-      locate<false, false, false>(newer_rv, rv);
-      break;
-    case 1:
-      locate<false, true, false>(newer_rv, rv);
-      break;
-    case 2:
-      locate<true, false, false>(newer_rv, rv);
-      break;
-    case 3:
-      locate<true, true, false>(newer_rv, rv);
-      break;
-  }
+  uint32_t hint_flags = (static_cast<uint32_t>(read_hint) << 1) | static_cast<uint32_t>(write_hint);
+
+  auto_locate(newer_rv, rv, hint_flags);
 
   if (rv == nullptr) {
     /*
@@ -236,6 +175,25 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
 #endif
     */
 
+    if (StaticConfig::kReserveAfterAbort)
+      reserve(tbl, cf_id, row_id, read_hint, write_hint);
+
+    if (StaticConfig::kCollectExtraCommitStats) {
+      abort_reason_target_count_ = &ctx_->stats().aborted_by_get_row_count;
+      abort_reason_target_time_ = &ctx_->stats().aborted_by_get_row_time;
+    }
+    return false;
+  }
+
+  rv->rts.update(ts_);
+  auto first_rv = rv;
+
+  newer_rv = tbl->head(cf_id, row_id);
+  rv = newer_rv->older_rv;
+
+  auto_locate(newer_rv, rv, hint_flags);
+
+  if (rv != first_rv) {
     if (StaticConfig::kReserveAfterAbort)
       reserve(tbl, cf_id, row_id, read_hint, write_hint);
 
@@ -279,32 +237,20 @@ bool Transaction<StaticConfig>::peek_row(RAHPO& rah, Table<StaticConfig>* tbl,
 
   Timing t(ctx_->timing_stack(), &Stats::execution_read);
 
-  (void)check_dup_access;
-  if (check_dup_access && access_bucket_count_ != 0) {
-    uint16_t bkt_id;
-    AccessBucket* bkt;
-
-    bkt_id = (reinterpret_cast<size_t>(tbl) / 64 + row_id) %
-             StaticConfig::kAccessBucketRootCount;
-    bkt = &access_buckets_[bkt_id];
-    while (true) {
-      for (auto i = 0; i < bkt->count; i++) {
-        auto item = &accesses_[bkt->idx[i]];
-        if (item->row_id == row_id && item->tbl == tbl &&
-            item->cf_id == cf_id) {
-          rah.tbl_ = item->tbl;
-          rah.cf_id_ = item->cf_id;
-          rah.row_id_ = item->row_id;
-          if (item->write_rv != nullptr)
-            rah.read_rv_ = item->write_rv;
-          else
-            rah.read_rv_ = item->read_rv;
-          return true;
-        }
-      }
-      if (bkt->next == AccessBucket::kEmptyBucketID) break;
-      bkt_id = bkt->next;
-      bkt = &access_buckets_[bkt_id];
+  if (check_dup_access) {
+    auto it = access_history_.find({tbl, row_id, cf_id});
+    if (it != access_history_.end()) {
+      auto idx = it->second;
+      assert(idx < access_size_);
+      auto item = &accesses_[idx];
+      rah.tbl_ = item->tbl;
+      rah.cf_id_ = item->cf_id;
+      rah.row_id_ = item->row_id;
+      if (item->write_rv != nullptr)
+        rah.read_rv_ = item->write_rv;
+      else
+        rah.read_rv_ = item->read_rv;
+      return true;
     }
   }
 
@@ -356,7 +302,7 @@ bool Transaction<StaticConfig>::read_row(RAH& rah,
   item->state = RowAccessState::kRead;
 
   // Yihe: Update rts here early
-  item->read_rv->rts.update(ts_);
+  //item->read_rv->rts.update(ts_);
 
   //rset_idx_[rset_size_++] = item->i;
 
@@ -393,29 +339,13 @@ bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
   // Yihe: Add to access set (write set) if it's not added yet.
   if (rah.set_item_ == nullptr) {
     if (check_dup_access) {
-      uint16_t bkt_id = (reinterpret_cast<size_t>(item->tbl) / 64 + item->row_id)
-                        % StaticConfig::kAccessBucketRootCount;
-      AccessBucket* bkt = &access_buckets_[bkt_id];
+      auto it = access_history_.find({item->tbl, item->row_id, item->cf_id});
+      assert(it == access_history_.end());
 
-      if (bkt->count == StaticConfig::kAccessBucketSize) {
-        // Allocate a new acccess bucket if needed.
-        auto new_bkt_id = access_bucket_count_++;
-        if (access_buckets_.size() < access_bucket_count_)
-          access_buckets_.resize(access_bucket_count_);
-        auto new_bkt = &access_buckets_[new_bkt_id];
-        new_bkt->count = 0;
-        new_bkt->next = AccessBucket::kEmptyBucketID;
-
-        // We must refresh bkt pointer because std::vector's resize() can move
-        // the buffer.
-        bkt = &access_buckets_[bkt_id];
-        bkt->next = new_bkt_id;
-        bkt = new_bkt;
-      }
-      bkt->idx[bkt->count++] = access_size_;
+      auto ins_res = access_history_.insert({{item->tbl, item->row_id, item->cf_id}, access_size_});
+      assert(ins_res.second);
     }
 
-    // assert(access_size_ < StaticConfig::kMaxAccessSize);
     if (access_size_ >= StaticConfig::kMaxAccessSize) {
       printf("too large access\n");
       assert(false);
@@ -426,6 +356,7 @@ bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
   }
 
   item = &rah.item();
+  assert(item->state != RowAccessState::kPeek);
 
   // New rows are writable by default.
   if (item->state == RowAccessState::kNew) return true;
@@ -509,6 +440,27 @@ bool Transaction<StaticConfig>::delete_row(RAH& rah) {
   rah.reset();
 
   return true;
+}
+
+template <class StaticConfig>
+void Transaction<StaticConfig>::auto_locate(RowCommon<StaticConfig>*& newer_rv,
+                                            RowVersion<StaticConfig>*& rv,
+                                            uint32_t hint_flags) {
+  switch (hint_flags) {
+    default:
+    case 0:
+      locate<false, false, false>(newer_rv, rv);
+      break;
+    case 1:
+      locate<false, true, false>(newer_rv, rv);
+      break;
+    case 2:
+      locate<true, false, false>(newer_rv, rv);
+      break;
+    case 3:
+      locate<true, true, false>(newer_rv, rv);
+      break;
+  }
 }
 
 template <class StaticConfig>

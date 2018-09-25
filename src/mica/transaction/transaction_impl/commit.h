@@ -75,7 +75,8 @@ bool Transaction<StaticConfig>::begin(bool peek_only,
   //rset_size_ = 0;
   wset_size_ = 0;
 
-  access_bucket_count_ = 0;
+  //access_bucket_count_ = 0;
+  access_history_.clear();
 
   if (StaticConfig::kVerbose) printf("begin: ts=%" PRIu64 "\n", ts_.t2);
 
@@ -138,6 +139,7 @@ bool Transaction<StaticConfig>::check_version() {
     // Yihe: added this assert to make sure we are not doing anything crazy.
     // pure reads should never be in the access set now
     assert(item->state != RowAccessState::kRead);
+    assert(item->state != RowAccessState::kPeek);
 
     // These states do not need any validation.
     if (item->state == RowAccessState::kInvalid ||
@@ -146,8 +148,10 @@ bool Transaction<StaticConfig>::check_version() {
       continue;
 
     auto rv = item->newer_rv->older_rv;
-    if (item->write_rv == nullptr)
+    if (item->write_rv == nullptr) {
+      assert(false);
       locate<true, false, true>(item->newer_rv, rv);
+    }
     else
       locate<true, true, true>(item->newer_rv, rv);
     if (rv == nullptr) {
