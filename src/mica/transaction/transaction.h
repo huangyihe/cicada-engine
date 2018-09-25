@@ -11,6 +11,20 @@
 #include "mica/transaction/stats.h"
 #include "mica/util/memcpy.h"
 
+// CS 61 hash function
+namespace std {
+template <typename T, typename U>
+struct hash<pair<T, U>> {
+  size_t operator()(const pair<T, U>& x) const {
+    size_t h1 = std::hash<T>{}(x.first);
+    size_t h2 = std::hash<U>{}(x.second);
+    size_t k = 0xC6A4A7935BD1E995UL;
+    h2 = ((h2 * k) >> 47) * k;
+    return (h1 ^ h2) * k;
+  }
+};
+}
+
 namespace mica {
 namespace transaction {
 enum class Result {
@@ -115,6 +129,8 @@ class Transaction {
 
  protected:
   // transaction_impl/operation.h
+  void auto_locate(RowCommon<StaticConfig>*& newer_rv,
+                   RowVersion<StaticConfig>*& rv, uint32_t hint_flags);
   template <bool ForRead, bool ForWrite, bool ForValidation>
   void locate(RowCommon<StaticConfig>*& newer_rv,
               RowVersion<StaticConfig>*& rv);
@@ -164,13 +180,27 @@ class Transaction {
   uint16_t rset_idx_[StaticConfig::kMaxAccessSize];
   uint16_t wset_idx_[StaticConfig::kMaxAccessSize];
 
-  struct AccessBucket {
-    static constexpr uint16_t kEmptyBucketID = static_cast<uint16_t>(-1);
-    uint16_t count;
-    uint16_t next;
-    uint16_t idx[StaticConfig::kAccessBucketSize];
-  } __attribute__((aligned(64)));
-  std::vector<AccessBucket> access_buckets_;
+  struct AccessKey {
+    Table<StaticConfig>* tbl;
+    uint64_t row_id;
+    uint16_t cf_id;
+
+    bool operator==(const AccessKey& o) const {
+        return ((tbl == o.tbl) && (row_id == o.row_id)
+                               && (cf_id == o.cf_id));
+    }
+    uint64_t hash() const {
+        auto p1 = std::make_pair(tbl, cf_id);
+        auto p2 = std::make_pair(p1, row_id);
+        return std::hash<decltype(p2)>{}(p2);
+    }
+  };
+  struct AccessKeyHasher {
+    std::size_t operator()(const AccessKey& ak) const {
+        return ak.hash();
+    }
+  };
+  std::unordered_map<AccessKey, int, AccessKeyHasher> access_history_;
 
   struct ReserveItem {
     ReserveItem(Table<StaticConfig>* tbl, uint16_t cf_id, uint64_t row_id,

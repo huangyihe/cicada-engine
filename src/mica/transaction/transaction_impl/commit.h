@@ -75,7 +75,8 @@ bool Transaction<StaticConfig>::begin(bool peek_only,
   rset_size_ = 0;
   wset_size_ = 0;
 
-  access_bucket_count_ = 0;
+  //access_bucket_count_ = 0;
+  access_history_.clear();
 
   if (StaticConfig::kVerbose) printf("begin: ts=%" PRIu64 "\n", ts_.t2);
 
