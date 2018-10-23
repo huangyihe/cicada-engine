@@ -72,10 +72,12 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
 
   if (check_dup_access) {
     auto it = access_history_.find({tbl, row_id, cf_id});
+    (void)it;
     // new rows must haven't been accessed before
     assert(it == access_history_.end());
 
     auto ins_res = access_history_.insert({{tbl, row_id, cf_id}, access_size_});
+    (void)ins_res;
     assert(ins_res.second);
   }
 
@@ -193,6 +195,7 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
 
   if (check_dup_access) {
     auto ins_res = access_history_.insert({{tbl, row_id, cf_id}, access_size_});
+    (void)ins_res;
     assert(ins_res.second);
   }
 
