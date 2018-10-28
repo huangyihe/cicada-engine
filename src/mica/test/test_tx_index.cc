@@ -75,6 +75,7 @@ struct Task {
   // Workload.
   uint64_t num_keys;
   uint64_t tx_count;
+  uint64_t op_count;
   bool disjoint_key_range;
   bool hash_keys;
   double zipf_theta;
@@ -174,17 +175,25 @@ void worker_proc(Task* task) {
     ::mica::util::ZipfGen zg(num_keys, task->zipf_theta, seed);
     ::mica::util::Rand op_type_rand((seed + 1) & seed_mask);
 
+    // pair is {op_type, key}
+    std::vector<std::pair<int, uint64_t>> op_keys(task->op_count);
+
     for (uint64_t i = 0; i < task->tx_count; i++) {
-      double op_type_f = op_type_rand.next_f64();
+      op_keys.clear();
+      // generate keys for the transaction
+      for (uint64_t oi = 0; oi < task->op_count; ++oi) {
+        double op_type_f = op_type_rand.next_f64();
 
-      int op_type;
-      for (op_type = 0; op_type < OpType::kMax - 1; op_type++)
-        if (op_type_f < thresholds[op_type]) break;
+        int op_type;
+        for (op_type = 0; op_type < OpType::kMax - 1; op_type++)
+          if (op_type_f < thresholds[op_type]) break;
 
-      uint64_t key = zg.next();
-      if (task->hash_keys) key = (key * 0x9ddfea08eb382d69ULL) % num_keys;
-      key += key_offset;
-      // printf("lcore %" PRIu64 " key=%" PRIu64 "\n", task->thread_id, key);
+        uint64_t key = zg.next();
+        if (task->hash_keys) key = (key * 0x9ddfea08eb382d69ULL) % num_keys;
+        key += key_offset;
+        // printf("lcore %" PRIu64 " key=%" PRIu64 "\n", task->thread_id, key);
+        op_keys.emplace_back(op_type, key);
+      }
 
       int trial = 0;
       while (true) {
@@ -201,102 +210,98 @@ void worker_proc(Task* task) {
           }
         }
 
-        bool use_snapshot =
-            op_type == kLookupSnapshot || op_type == kScanSnapshot;
-        if (!tx.begin(use_snapshot)) assert(false);
-
         bool have_to_abort = false;
+        if (!tx.begin(false)) assert(false);
 
-        row_id = 0;
-        suspicious = false;
+        for (auto& op : op_keys) {
+          auto op_type = op.first;
+          auto key = op.second;
 
-        switch (op_type) {
-          case OpType::kInsert:
-            if (hash_idx != nullptr)
-              op_result = hash_idx->insert(&tx, key, make_value(key));
-            else
-              op_result = btree_idx->insert(&tx, key, make_value(key));
+          row_id = 0;
+          suspicious = false;
+
+          switch (op_type) {
+            case OpType::kInsert:
+              if (hash_idx != nullptr)
+                op_result = hash_idx->insert(&tx, key, make_value(key));
+              else
+                op_result = btree_idx->insert(&tx, key, make_value(key));
+              break;
+            case OpType::kRemove:
+              if (hash_idx != nullptr)
+                op_result = hash_idx->remove(&tx, key, make_value(key));
+              else
+                op_result = btree_idx->remove(&tx, key, make_value(key));
+              break;
+            case OpType::kLookup:
+              if (hash_idx != nullptr)
+                op_result = hash_idx->lookup(&tx, key, false, lookup_consumer);
+              else
+                op_result = btree_idx->lookup(&tx, key, false, lookup_consumer);
+              if (op_result != 0 && row_id != make_value(key)) suspicious = true;
+              break;
+            case OpType::kLookupSnapshot:
+              if (hash_idx != nullptr)
+                op_result = hash_idx->lookup(&tx, key, true, lookup_consumer);
+              else
+                op_result = btree_idx->lookup(&tx, key, true, lookup_consumer);
+              if (op_result != 0 && row_id != make_value(key)) suspicious = true;
+              break;
+            case OpType::kScan:
+              if (hash_idx != nullptr)
+                op_result = 0;  // Not implemented.
+              else
+                op_result = btree_idx->lookup<BTreeRangeType::kInclusive,
+                                              BTreeRangeType::kOpen, false>(
+                    &tx, key, max_key, false, scan_consumer);
+              break;
+            case OpType::kScanSnapshot:
+              left = kScanLen;
+              if (hash_idx != nullptr)
+                op_result = 0;  // Not implemented.
+              else
+                op_result = btree_idx->lookup<BTreeRangeType::kInclusive,
+                                              BTreeRangeType::kOpen, false>(
+                    &tx, key, max_key, true, scan_consumer);
+              break;
+            default:
+              op_result = 0;
+              assert(false);
+          }
+
+          if ((hash_idx != nullptr && op_result == HashIndex::kHaveToAbort) ||
+              (btree_idx != nullptr && op_result == BTreeIndex::kHaveToAbort))
+            have_to_abort = true;
+
+          if (have_to_abort) {
+            aborted[op_type]++;
             break;
-          case OpType::kRemove:
-            if (hash_idx != nullptr)
-              op_result = hash_idx->remove(&tx, key, make_value(key));
-            else
-              op_result = btree_idx->remove(&tx, key, make_value(key));
-            break;
-          case OpType::kLookup:
-            if (hash_idx != nullptr)
-              op_result = hash_idx->lookup(&tx, key, false, lookup_consumer);
-            else
-              op_result = btree_idx->lookup(&tx, key, false, lookup_consumer);
-            if (op_result != 0 && row_id != make_value(key)) suspicious = true;
-            break;
-          case OpType::kLookupSnapshot:
-            if (hash_idx != nullptr)
-              op_result = hash_idx->lookup(&tx, key, true, lookup_consumer);
-            else
-              op_result = btree_idx->lookup(&tx, key, true, lookup_consumer);
-            if (op_result != 0 && row_id != make_value(key)) suspicious = true;
-            break;
-          case OpType::kScan:
-            if (hash_idx != nullptr)
-              op_result = 0;  // Not implemented.
-            else
-              op_result = btree_idx->lookup<BTreeRangeType::kInclusive,
-                                            BTreeRangeType::kOpen, false>(
-                  &tx, key, max_key, false, scan_consumer);
-            break;
-          case OpType::kScanSnapshot:
-            left = kScanLen;
-            if (hash_idx != nullptr)
-              op_result = 0;  // Not implemented.
-            else
-              op_result = btree_idx->lookup<BTreeRangeType::kInclusive,
-                                            BTreeRangeType::kOpen, false>(
-                  &tx, key, max_key, true, scan_consumer);
-            break;
-          default:
+          }
+
+          // Suspicious reads should not be committed.
+          if (suspicious) {
+            printf("incorrect read got committed: key=%" PRIu64
+                   " expected_value=%" PRIu64 " actual_value=%" PRIu64 "\n",
+                   key, make_value(key), row_id);
             assert(false);
-        }
+          }
 
-        if ((hash_idx != nullptr && op_result == HashIndex::kHaveToAbort) ||
-            (btree_idx != nullptr && op_result == BTreeIndex::kHaveToAbort))
-          have_to_abort = true;
+          if (op_result != 0)
+            succeeded[op_type]++;
+          else
+            failed[op_type]++;
+        } // for (op : op_keys)
 
         Result result;
         if (have_to_abort || !tx.commit(&result)) {
           tx.abort();
-          aborted[op_type]++;
-
-          if (trial == 10000) {
-            printf("warning: many aborts with key=%" PRIu64 "\n", key);
-            if (!tx.begin(true)) assert(false);
-            btree_idx->check(&tx);
-            printf("=== dump start ===\n");
-            btree_idx->dump_tree(&tx);
-            printf("=== dump end ===\n");
-            tx.abort();
-            assert(false);
-          }
           continue;
         }
 
-        // Suspicious reads should not be committed.
-        if (suspicious) {
-          printf("incorrect read got committed: key=%" PRIu64
-                 " expected_value=%" PRIu64 " actual_value=%" PRIu64 "\n",
-                 key, make_value(key), row_id);
-          assert(false);
-        }
-
-        assert(result == Result::kCommitted);
+        assert(result == Result::KCommitted);
         (void)result;
-
-        if (op_result != 0)
-          succeeded[op_type]++;
-        else
-          failed[op_type]++;
         break;
-      }
+      } // while (true)
     }
   }
 
@@ -353,8 +358,8 @@ void worker_proc(Task* task) {
 }
 
 int main(int argc, const char* argv[]) {
-  if (argc != 5) {
-    printf("%s NUM-KEYS ZIPF-THETA TX-COUNT THREAD-COUNT\n", argv[0]);
+  if (argc != 6) {
+    printf("%s NUM-KEYS ZIPF-THETA TX-COUNT OP-COUNT THREAD-COUNT\n", argv[0]);
     return EXIT_FAILURE;
   }
 
@@ -363,7 +368,8 @@ int main(int argc, const char* argv[]) {
   uint64_t num_keys = static_cast<uint64_t>(atol(argv[1]));
   double zipf_theta = atof(argv[2]);
   uint64_t tx_count = static_cast<uint64_t>(atol(argv[3]));
-  uint64_t num_threads = static_cast<uint64_t>(atol(argv[4]));
+  uint64_t op_count = static_cast<uint64_t>(atol(argv[4]));
+  uint64_t num_threads = static_cast<uint64_t>(atol(argv[5]));
 
   Alloc alloc(config.get("alloc"));
   auto page_pool_size = 8 * uint64_t(1073741824);
@@ -434,6 +440,21 @@ int main(int argc, const char* argv[]) {
     int post_condition;  // 0 = no check; 1 = full; 2 = empty
 
   } workloads[] = {
+      /*{"[ 0] Sequential inserts (100% success)",
+       (num_keys + num_threads - 1) / num_threads,
+       true,
+       false,
+       -1,
+       {1., 0., 0., 0., 0., 0.},
+       1},
+      {"[ 1] Sequential removals (100% success)",
+       (num_keys + num_threads - 1) / num_threads,
+       true,
+       false,
+       -1,
+       {0., 1., 0., 0., 0., 0.},
+       2},
+      *
       {"[ 0] Sequential inserts (100% success)",
        (num_keys + num_threads - 1) / num_threads,
        true,
@@ -448,7 +469,6 @@ int main(int argc, const char* argv[]) {
        -1,
        {0., 1., 0., 0., 0., 0.},
        2},
-      /*
       {"[ 0] Sequential inserts (100% success)",
        (num_keys + num_threads - 1) / num_threads,
        true,
@@ -463,21 +483,7 @@ int main(int argc, const char* argv[]) {
        -1,
        {0., 1., 0., 0., 0., 0.},
        2},
-      {"[ 0] Sequential inserts (100% success)",
-       (num_keys + num_threads - 1) / num_threads,
-       true,
-       false,
-       -1,
-       {1., 0., 0., 0., 0., 0.},
-       1},
-      {"[ 1] Sequential removals (100% success)",
-       (num_keys + num_threads - 1) / num_threads,
-       true,
-       false,
-       -1,
-       {0., 1., 0., 0., 0., 0.},
-       2},
-       */
+       *
       {"[ 2] Sequential lookups (100% failure)",
        tx_count,
        true,
@@ -548,6 +554,7 @@ int main(int argc, const char* argv[]) {
        zipf_theta,
        {1., 0., 0., 0., 0., 0.},
        0},
+       */
       {"[12] Random inserts+removals+lookups (50% success)",
        tx_count,
        false,
@@ -555,6 +562,7 @@ int main(int argc, const char* argv[]) {
        zipf_theta,
        {0.3333, 0.3333, 0.3334, 0., 0., 0.},
        0},
+       /*
       {"[13] Random inserts+removals+snapshot-lookups (50% success)",
        tx_count,
        false,
@@ -562,6 +570,7 @@ int main(int argc, const char* argv[]) {
        zipf_theta,
        {0.3333, 0.3333, 0., 0.3334, 0., 0.},
        0},
+       */
   };
 
   size_t run_perf = 10000;
@@ -579,6 +588,7 @@ int main(int argc, const char* argv[]) {
       tasks[thread_id].num_keys = num_keys;
 
       tasks[thread_id].tx_count = workloads[i].tx_count;
+      tasks[thread_id].op_count = op_count;
       tasks[thread_id].disjoint_key_range = workloads[i].disjoint_key_range;
       tasks[thread_id].hash_keys = workloads[i].hash_keys;
       tasks[thread_id].zipf_theta = workloads[i].zipf_theta;
