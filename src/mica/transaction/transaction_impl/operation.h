@@ -74,9 +74,11 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
     auto it = access_history_.find({tbl, row_id, cf_id});
     // new rows must haven't been accessed before
     assert(it == access_history_.end());
+    (void)it;
 
     auto ins_res = access_history_.insert({{tbl, row_id, cf_id}, access_size_});
     assert(ins_res.second);
+    (void)ins_res;
   }
 
   // assert(access_size_ < StaticConfig::kMaxAccessSize);
@@ -341,9 +343,11 @@ bool Transaction<StaticConfig>::write_row(RAH& rah, uint64_t data_size,
     if (check_dup_access) {
       auto it = access_history_.find({item->tbl, item->row_id, item->cf_id});
       assert(it == access_history_.end());
+      (void)it;
 
       auto ins_res = access_history_.insert({{item->tbl, item->row_id, item->cf_id}, access_size_});
       assert(ins_res.second);
+      (void)ins_res;
     }
 
     if (access_size_ >= StaticConfig::kMaxAccessSize) {
