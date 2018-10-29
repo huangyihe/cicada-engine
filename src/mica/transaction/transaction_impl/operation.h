@@ -2,6 +2,8 @@
 #ifndef MICA_TRANSACTION_TRANSACTION_IMPL_OPERATION_H_
 #define MICA_TRANSACTION_TRANSACTION_IMPL_OPERATION_H_
 
+#include <iostream>
+
 namespace mica {
 namespace transaction {
 template <class StaticConfig>
@@ -678,6 +680,35 @@ void Transaction<StaticConfig>::print_version_chain(
   }
   printf("rv=%p\n", rv);
 }
+
+template <class StaticConfig>
+void
+Transaction<StaticConfig>::add_item_pretty_name(Table<StaticConfig>* tbl,
+                                                uint16_t cf_id,
+                                                uint64_t row_id,
+                                                const std::string&& pretty_name) {
+  if (StaticConfig::kAbortHH) {
+    checktime_abort_hh->irm_add({ tbl, cf_id, row_id }, pretty_name);
+  }
+}
+
+template <class StaticConfig>
+void Transaction<StaticConfig>::print_hh_abort_diagnostics() {
+  std::stringstream ss;
+  ss << "txn: " << this << std::endl;
+  ss << "  Top check time locate() aborts:" << std::endl;
+  ss << checktime_abort_hh->dump_stats();
+  ss << "  Top check time inconsistency aborts:" << std::endl;
+  ss << checktime_inconsistent_hh->dump_stats() << std::endl;
+
+  io_mutex->lock();
+  std::cout << ss.str() << std::flush;
+  io_mutex->unlock();
+}
+
+template <class StaticConfig>
+std::mutex *Transaction<StaticConfig>::io_mutex = new std::mutex();
+
 }
 }
 

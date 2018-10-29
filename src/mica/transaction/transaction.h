@@ -10,6 +10,9 @@
 #include "mica/transaction/timestamp.h"
 #include "mica/transaction/stats.h"
 #include "mica/util/memcpy.h"
+#include "mica/transaction/hh_accounter.h"
+
+#include <mutex>
 
 // CS 61 hash function
 namespace std {
@@ -49,6 +52,8 @@ class Transaction {
   static constexpr uint64_t kNewRowID = static_cast<uint64_t>(-1);
   static constexpr uint64_t kDefaultWriteDataSize = static_cast<uint64_t>(-1);
 
+  void add_item_pretty_name(Table<StaticConfig>* tbl, uint16_t cf_id,
+                            uint64_t row_id, const std::string&& pretty_name);
   // transaction_impl/init.h
   Transaction(Context<StaticConfig>* ctx);
   ~Transaction();
@@ -194,6 +199,12 @@ class Transaction {
         auto p2 = std::make_pair(p1, row_id);
         return std::hash<decltype(p2)>{}(p2);
     }
+
+    operator std::string() const {
+      std::stringstream ss;
+      ss << "t=" << tbl << ", c=" << cf_id << ", r=" << row_id;
+      return ss.str();
+    }
   };
   struct AccessKeyHasher {
     std::size_t operator()(const AccessKey& ak) const {
@@ -201,6 +212,15 @@ class Transaction {
     }
   };
   std::unordered_map<AccessKey, int, AccessKeyHasher> access_history_;
+
+  // Yihe: Debugging heavy hitters
+  using Accounter = HHAccounter<AccessKey, AccessKeyHasher>;
+  typename Accounter::irm_type* pretty_name_map;
+  Accounter* checktime_abort_hh;
+  Accounter* checktime_inconsistent_hh;
+
+  static std::mutex *io_mutex;
+  void print_hh_abort_diagnostics();
 
   struct ReserveItem {
     ReserveItem(Table<StaticConfig>* tbl, uint16_t cf_id, uint64_t row_id,

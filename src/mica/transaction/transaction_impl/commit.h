@@ -155,6 +155,9 @@ bool Transaction<StaticConfig>::check_version() {
     else
       locate<true, true, true>(item->newer_rv, rv);
     if (rv == nullptr) {
+      if (StaticConfig::kAbortHH) {
+        checktime_abort_hh->account({ item->tbl, item->row_id, item->cf_id });
+      }
       if (StaticConfig::kReserveAfterAbort)
         reserve(item->tbl, item->cf_id, item->row_id,
                 item->state == RowAccessState::kRead ||
@@ -170,6 +173,9 @@ bool Transaction<StaticConfig>::check_version() {
     if (rv != item->read_rv && (item->state == RowAccessState::kRead ||
                                 item->state == RowAccessState::kReadWrite ||
                                 item->state == RowAccessState::kReadDelete)) {
+      if (StaticConfig::kAbortHH) {
+        checktime_inconsistent_hh->account({ item->tbl, item->row_id, item->cf_id });
+      }
       if (StaticConfig::kReserveAfterAbort)
         reserve(item->tbl, item->cf_id, item->row_id, true,
                 item->state == RowAccessState::kWrite ||

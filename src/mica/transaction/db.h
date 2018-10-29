@@ -160,6 +160,10 @@ struct BasicDBConfig {
 
   // Show verbose messages.
   static constexpr bool kVerbose = false;
+
+  // Account for abort heavy hitters
+  static constexpr bool kAbortHH = false;
+  static constexpr size_t kAbortHHSize = 10;
 };
 
 template <class StaticConfig = BasicDBConfig>
