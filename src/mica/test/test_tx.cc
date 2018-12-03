@@ -421,6 +421,9 @@ int main(int argc, const char* argv[]) {
   printf("num_rows = %" PRIu64 "\n", num_rows);
   printf("reqs_per_tx = %" PRIu64 "\n", reqs_per_tx);
   printf("read_ratio = %lf\n", read_ratio);
+  if (read_ratio < 0) {
+    printf(" Yihe: Using the scan-many-update-one benchmark\n");
+  }
   printf("zipf_theta = %lf\n", zipf_theta);
   printf("tx_count = %" PRIu64 "\n", tx_count);
   printf("num_threads = %" PRIu64 "\n", num_threads);
@@ -659,8 +662,8 @@ int main(int argc, const char* argv[]) {
         ::mica::util::Rand op_type_rand((seed + 1) & seed_mask);
         ::mica::util::Rand column_id_rand((seed + 2) & seed_mask);
         ::mica::util::Rand scan_len_rand((seed + 3) & seed_mask);
-        uint32_t read_threshold =
-            (uint32_t)(read_ratio * (double)((uint32_t)-1));
+        uint32_t read_threshold = read_ratio >= 0.0 ?
+            (uint32_t)(read_ratio * (double)((uint32_t)-1)) : 1;
         uint32_t rmw_threshold =
             (uint32_t)(kReadModifyWriteRatio * (double)((uint32_t)-1));
 
@@ -695,12 +698,24 @@ int main(int argc, const char* argv[]) {
             tasks[thread_id].row_ids[req_offset + req_i] = row_id;
             tasks[thread_id].column_ids[req_offset + req_i] = column_id;
 
-            if (op_type_rand.next_u32() <= read_threshold)
-              tasks[thread_id].op_types[req_offset + req_i] = 0;
-            else {
-              tasks[thread_id].op_types[req_offset + req_i] =
-                  op_type_rand.next_u32() <= rmw_threshold ? 1 : 2;
-              read_only_tx = false;
+            if (read_threshold != 1) {
+              if (op_type_rand.next_u32() <= read_threshold)
+                tasks[thread_id].op_types[req_offset + req_i] = 0;
+              else {
+                tasks[thread_id].op_types[req_offset + req_i] =
+                    op_type_rand.next_u32() <= rmw_threshold ? 1 : 2;
+                read_only_tx = false;
+              }
+            } else {
+              // the read-many write one benchmark
+              if (reqs_per_tx < 1) {
+                abort();
+              }
+              if (req_i != ((reqs_per_tx - 1) * 2 / 3)) {
+                tasks[thread_id].op_types[req_offset + req_i] = 0;
+              } else {
+                tasks[thread_id].op_types[req_offset + req_i] = 1;
+              }
             }
           }
           tasks[thread_id].req_counts[tx_i] =
