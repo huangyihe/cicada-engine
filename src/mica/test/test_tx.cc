@@ -670,7 +670,7 @@ int main(int argc, const char* argv[]) {
         uint64_t req_offset = 0;
 
         for (uint64_t tx_i = 0; tx_i < tx_count; tx_i++) {
-          bool read_only_tx = true;
+          bool read_only_tx = read_threshold != 1;
 
           for (uint64_t req_i = 0; req_i < reqs_per_tx; req_i++) {
             size_t row_id;
