@@ -719,7 +719,7 @@ int main(int argc, const char* argv[]) {
                 abort();
               }
               if (all_write) {
-                  tasks[thread_id].op_types[req_offset + req_i] = 1;
+                  tasks[thread_id].op_types[req_offset + req_i] = 2;
               } else {
                 if (req_i != ((reqs_per_tx - 1) * 2 / 3)) {
                   tasks[thread_id].op_types[req_offset + req_i] = 0;
