@@ -424,6 +424,10 @@ int main(int argc, const char* argv[]) {
   if (read_ratio < 0) {
     printf(" Yihe: Using the scan-many-update-one benchmark\n");
   }
+  if (read_ratio > 1.0 || read_ratio < -1.0) {
+    printf("Doesn't make sense\n");
+    exit(1);
+  }
   printf("zipf_theta = %lf\n", zipf_theta);
   printf("tx_count = %" PRIu64 "\n", tx_count);
   printf("num_threads = %" PRIu64 "\n", num_threads);
@@ -664,6 +668,8 @@ int main(int argc, const char* argv[]) {
         ::mica::util::Rand scan_len_rand((seed + 3) & seed_mask);
         uint32_t read_threshold = read_ratio >= 0.0 ?
             (uint32_t)(read_ratio * (double)((uint32_t)-1)) : 1;
+        uint32_t all_write_threshold = read_ratio >= 0 ?
+            0 : (uint32_t)((1.0 + read_ratio) * (double)(uint32_t)-1);
         uint32_t rmw_threshold =
             (uint32_t)(kReadModifyWriteRatio * (double)((uint32_t)-1));
 
@@ -671,6 +677,7 @@ int main(int argc, const char* argv[]) {
 
         for (uint64_t tx_i = 0; tx_i < tx_count; tx_i++) {
           bool read_only_tx = read_threshold != 1;
+          bool all_write = (read_threshold == 1) && (op_type_rand.next_u32() < all_write_threshold);
 
           for (uint64_t req_i = 0; req_i < reqs_per_tx; req_i++) {
             size_t row_id;
@@ -711,10 +718,14 @@ int main(int argc, const char* argv[]) {
               if (reqs_per_tx < 1) {
                 abort();
               }
-              if (req_i != ((reqs_per_tx - 1) * 2 / 3)) {
-                tasks[thread_id].op_types[req_offset + req_i] = 0;
+              if (all_write) {
+                  tasks[thread_id].op_types[req_offset + req_i] = 1;
               } else {
-                tasks[thread_id].op_types[req_offset + req_i] = 1;
+                if (req_i != ((reqs_per_tx - 1) * 2 / 3)) {
+                  tasks[thread_id].op_types[req_offset + req_i] = 0;
+                } else {
+                  tasks[thread_id].op_types[req_offset + req_i] = 1;
+                }
               }
             }
           }
