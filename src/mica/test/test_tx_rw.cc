@@ -1,7 +1,10 @@
+#include <sys/types.h>
+#include <unistd.h>
 #include <cstdio>
 #include <atomic>
 #include <thread>
 #include <random>
+#include <sstream>
 #include "mica/transaction/db.h"
 #include "mica/util/lcore.h"
 #include "mica/util/zipf.h"
@@ -373,7 +376,7 @@ void worker_proc(Task* task) {
 }
 
 int main(int argc, const char* argv[]) {
-  if (argc != 8) {
+  if (argc < 8) {
     printf(
         "%s NUM-ROWS REQS-PER-TX REQS-PER-WR-TX WR-TX-RATIO ZIPF-THETA TX-COUNT "
         "THREAD-COUNT\n",
@@ -390,6 +393,7 @@ int main(int argc, const char* argv[]) {
   double zipf_theta = atof(argv[5]);
   uint64_t tx_count = static_cast<uint64_t>(atol(argv[6]));
   uint64_t num_threads = static_cast<uint64_t>(atol(argv[7]));
+  bool run_perf = (argc > 8) && (atol(argv[8]) != 0);
 
   Alloc alloc(config.get("alloc"));
   auto page_pool_size = 24 * uint64_t(1073741824);
@@ -428,6 +432,7 @@ int main(int argc, const char* argv[]) {
   printf("zipf_theta = %lf\n", zipf_theta);
   printf("tx_count = %" PRIu64 "\n", tx_count);
   printf("num_threads = %" PRIu64 "\n", num_threads);
+  printf("run_perf = %" PRIu64 "\n", static_cast<uint64_t>(run_perf));
 #ifndef NDEBUG
   printf("!NDEBUG\n");
 #endif
@@ -645,8 +650,11 @@ int main(int argc, const char* argv[]) {
     for (uint64_t thread_id = 1; thread_id < num_threads; thread_id++)
       threads.emplace_back(worker_proc, &tasks[thread_id]);
 
-    if (phase != 0 && kRunPerf) {
-      int r = system("perf record -a sleep 1 &");
+    // Yihe: No longer uses kRunPerf below
+    if (phase != 0 && run_perf) {
+      std::stringstream ss;
+      ss << "sleep 1 && perf record -p " << getpid() << " &";
+      int r = system(ss.str().c_str());
       // int r = system("perf record -a -g sleep 1 &");
       (void)r;
     }
