@@ -110,6 +110,12 @@ IF(LTO)
   ADD_EXECUTABLE(test_tx_index src/mica/test/test_tx_index.cc ${SOURCES})
   TARGET_LINK_LIBRARIES(test_tx_index ${LIBRARIES})
 
+  ADD_EXECUTABLE(test_zipf src/mica/test/test_zipf.cc ${SOURCES})
+  TARGET_LINK_LIBRARIES(test_zipf ${LIBRARIES})
+
+  ADD_EXECUTABLE(test_tx_rw src/mica/test/test_tx_rw.cc ${SOURCES})
+  TARGET_LINK_LIBRARIES(test_tx_rw ${LIBRARIES})
+
 ELSE(LTO)
 
   ADD_LIBRARY(common ${SOURCES})
@@ -125,5 +131,11 @@ ELSE(LTO)
 
   ADD_EXECUTABLE(test_tx_index src/mica/test/test_tx_index.cc ${SOURCES})
   TARGET_LINK_LIBRARIES(test_tx_index ${LIBRARIES})
+
+  ADD_EXECUTABLE(test_zipf src/mica/test/test_zipf.cc ${SOURCES})
+  TARGET_LINK_LIBRARIES(test_zipf ${LIBRARIES})
+
+  ADD_EXECUTABLE(test_tx_rw src/mica/test/test_tx_rw.cc ${SOURCES})
+  TARGET_LINK_LIBRARIES(test_tx_rw ${LIBRARIES})
 
 ENDIF(LTO)
