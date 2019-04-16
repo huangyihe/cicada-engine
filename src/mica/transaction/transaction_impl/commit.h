@@ -156,6 +156,11 @@ bool Transaction<StaticConfig>::check_version() {
                     item->state == RowAccessState::kReadWrite ||
                     item->state == RowAccessState::kDelete ||
                     item->state == RowAccessState::kReadDelete);
+      auto db = item->tbl->db();
+      if (db->is_tbl_btree_index_unique(item->tbl) ||
+          db->is_tbl_btree_index_nonunique(item->tbl)) {
+        ++ctx_->stats().aborted_by_index_node_conflict_count;
+      }
       return false;
     }
 
@@ -168,6 +173,11 @@ bool Transaction<StaticConfig>::check_version() {
                     item->state == RowAccessState::kReadWrite ||
                     item->state == RowAccessState::kDelete ||
                     item->state == RowAccessState::kReadDelete);
+      auto db = item->tbl->db();
+      if (db->is_tbl_btree_index_unique(item->tbl) ||
+          db->is_tbl_btree_index_nonunique(item->tbl)) {
+        ++ctx_->stats().aborted_by_index_node_conflict_count;
+      }
       return false;
     }
   }

@@ -2,6 +2,7 @@
 #ifndef MICA_TRANSACTION_DB_H_
 #define MICA_TRANSACTION_DB_H_
 
+#include <unordered_set>
 #include <unordered_map>
 #include "mica/common.h"
 #include "mica/transaction/timestamp.h"
@@ -126,7 +127,7 @@ struct BasicDBConfig {
   // Collect commit-related statistics.  Required by kBackoff.
   static constexpr bool kCollectCommitStats = true;
   // Collect extra commit/abort latencies.
-  static constexpr bool kCollectExtraCommitStats = false;
+  static constexpr bool kCollectExtraCommitStats = true;
   // Collect the staleness of read-only transaction.
   static constexpr bool kCollectROTXStalenessStats = false;
   // Collect internal processing statistics (a bit slow).
@@ -273,6 +274,15 @@ class DB {
     return btree_idxs_unique_u64_[name];
   }
 
+  bool is_tbl_btree_index_unique(Table<StaticConfig>* tbl) const {
+    auto& s = btree_idxs_unique_tbl_set_;
+    return (s.find(tbl) != s.end());
+  }
+  bool is_tbl_btree_index_nonunique(Table<StaticConfig>* tbl) const {
+    auto& s = btree_idxs_nonunique_tbl_set_;
+    return (s.find(tbl) != s.end());
+  }
+
   bool create_btree_index_nonunique_u64(std::string name,
                                         Table<StaticConfig>* main_tbl);
 
@@ -326,6 +336,8 @@ class DB {
   std::unordered_map<std::string, BTreeIndexUniqueU64*> btree_idxs_unique_u64_;
   std::unordered_map<std::string, BTreeIndexNonuniqueU64*>
       btree_idxs_nonunique_u64_;
+  std::unordered_set<Table<StaticConfig>*> btree_idxs_unique_tbl_set_;
+  std::unordered_set<Table<StaticConfig>*> btree_idxs_nonunique_tbl_set_;
 
   // Modified by leader/worker threads very infrequently.
   volatile uint16_t leader_thread_id_;

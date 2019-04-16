@@ -18,6 +18,7 @@ struct Stats {
   uint64_t aborted_by_main_validation_count;
   uint64_t aborted_by_logging_count;
   uint64_t aborted_by_application_count;
+  uint64_t aborted_by_index_node_conflict_count;
 
   // kCollectCommitStats
   uint64_t tx_time;
@@ -92,6 +93,7 @@ struct Stats {
     aborted_by_main_validation_time += o.aborted_by_main_validation_time;
     aborted_by_logging_time += o.aborted_by_logging_time;
     aborted_by_application_time += o.aborted_by_application_time;
+    aborted_by_index_node_conflict_count += o.aborted_by_index_node_conflict_count;
 
     worker += o.worker;
     timestamping += o.timestamping;

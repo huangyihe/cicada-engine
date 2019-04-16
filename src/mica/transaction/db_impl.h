@@ -120,8 +120,10 @@ bool DB<StaticConfig>::create_btree_index_unique_u64(
     return false;
 
   const uint64_t kDataSizes[] = {BTreeIndexUniqueU64::kDataSize};
+  auto idx_tbl = new Table<StaticConfig>(this, 1, kDataSizes);
   auto idx = new BTreeIndexUniqueU64(
-      this, main_tbl, new Table<StaticConfig>(this, 1, kDataSizes));
+      this, main_tbl, idx_tbl);
+  btree_idxs_unique_tbl_set_.insert(idx_tbl);
   btree_idxs_unique_u64_[name] = idx;
   return true;
 }
@@ -133,8 +135,10 @@ bool DB<StaticConfig>::create_btree_index_nonunique_u64(
     return false;
 
   const uint64_t kDataSizes[] = {BTreeIndexNonuniqueU64::kDataSize};
+  auto idx_tbl = new Table<StaticConfig>(this, 1, kDataSizes);
   auto idx = new BTreeIndexNonuniqueU64(
-      this, main_tbl, new Table<StaticConfig>(this, 1, kDataSizes));
+      this, main_tbl, idx_tbl);
+  btree_idxs_nonunique_tbl_set_.insert(idx_tbl);
   btree_idxs_nonunique_u64_[name] = idx;
   return true;
 }
