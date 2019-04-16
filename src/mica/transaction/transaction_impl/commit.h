@@ -134,6 +134,7 @@ void Transaction<StaticConfig>::sort_wset() {
 
 template <class StaticConfig>
 bool Transaction<StaticConfig>::check_version() {
+  bool aborted = false;
   for (auto i = 0; i < access_size_; i++) {
     auto item = &accesses_[i];
 
@@ -164,7 +165,10 @@ bool Transaction<StaticConfig>::check_version() {
           db->is_tbl_btree_index_nonunique(item->tbl))) {
         abort_reason_secondary_count_ = &ctx_->stats().aborted_by_index_node_conflict_count;
         abort_reason_secondary_time_ = &ctx_->stats().aborted_by_index_node_conflict_time;
+        aborted = true;
+        continue;
       }
+      abort_reason_secondary_count_ = abort_reason_secondary_time_ = nullptr;
       return false;
     }
 
@@ -183,11 +187,14 @@ bool Transaction<StaticConfig>::check_version() {
           db->is_tbl_btree_index_nonunique(item->tbl))) {
         abort_reason_secondary_count_ = &ctx_->stats().aborted_by_index_node_conflict_count;
         abort_reason_secondary_time_ = &ctx_->stats().aborted_by_index_node_conflict_time;
+        aborted = true;
+        continue;
       }
+      abort_reason_secondary_count_ = abort_reason_secondary_time_ = nullptr;
       return false;
     }
   }
-  return true;
+  return !aborted;
 }
 
 template <class StaticConfig>
