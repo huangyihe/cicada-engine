@@ -154,6 +154,8 @@ class Transaction {
   uint64_t begin_time_;
   uint64_t* abort_reason_target_count_;
   uint64_t* abort_reason_target_time_;
+  uint64_t* abort_reason_secondary_count_;
+  uint64_t* abort_reason_secondary_time_;
 
   uint64_t last_commit_time_;
 

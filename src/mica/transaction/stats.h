@@ -29,6 +29,7 @@ struct Stats {
   uint64_t aborted_by_main_validation_time;
   uint64_t aborted_by_logging_time;
   uint64_t aborted_by_application_time;
+  uint64_t aborted_by_index_node_conflict_time;
 
   // ActiveTiming
   uint64_t worker;
@@ -83,6 +84,7 @@ struct Stats {
     aborted_by_main_validation_count += o.aborted_by_main_validation_count;
     aborted_by_logging_count += o.aborted_by_logging_count;
     aborted_by_application_count += o.aborted_by_application_count;
+    aborted_by_index_node_conflict_count += o.aborted_by_index_node_conflict_count;
 
     tx_time += o.tx_time;
     committed_time += o.committed_time;
@@ -93,7 +95,7 @@ struct Stats {
     aborted_by_main_validation_time += o.aborted_by_main_validation_time;
     aborted_by_logging_time += o.aborted_by_logging_time;
     aborted_by_application_time += o.aborted_by_application_time;
-    aborted_by_index_node_conflict_count += o.aborted_by_index_node_conflict_count;
+    aborted_by_index_node_conflict_time += o.aborted_by_index_node_conflict_time;
 
     worker += o.worker;
     timestamping += o.timestamping;

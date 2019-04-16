@@ -127,12 +127,15 @@ void DB<StaticConfig>::print_stats(double elapsed_time,
             static_cast<double>(stats.tx_time));
     printf(
         "aborted: idx node:         %10lu (%7.3lf M/sec; %6.2lf%% "
-        "attempts)\n",
+        "attempts, "
+        "%6.2lf%% time)\n",
         stats.aborted_by_index_node_conflict_count,
         static_cast<double>(stats.aborted_by_index_node_conflict_count) / elapsed_time /
             1000000.,
         100. * static_cast<double>(stats.aborted_by_index_node_conflict_count) /
-            static_cast<double>(stats.tx_count));
+            static_cast<double>(stats.tx_count),
+        100. * static_cast<double>(stats.aborted_by_index_node_conflict_time) /
+            static_cast<double>(stats.tx_time));
     printf("\n");
 
     printf("commit count:");

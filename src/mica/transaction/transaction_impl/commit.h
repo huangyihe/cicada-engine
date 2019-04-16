@@ -32,6 +32,8 @@ bool Transaction<StaticConfig>::begin(bool peek_only,
   if (StaticConfig::kCollectExtraCommitStats) {
     abort_reason_target_count_ = &ctx_->stats().aborted_by_application_count;
     abort_reason_target_time_ = &ctx_->stats().aborted_by_application_time;
+    abort_reason_secondary_count_ = nullptr;
+    abort_reason_secondary_time_ = nullptr;
   }
 
   while (true) {
@@ -157,9 +159,11 @@ bool Transaction<StaticConfig>::check_version() {
                     item->state == RowAccessState::kDelete ||
                     item->state == RowAccessState::kReadDelete);
       auto db = item->tbl->db();
-      if (db->is_tbl_btree_index_unique(item->tbl) ||
-          db->is_tbl_btree_index_nonunique(item->tbl)) {
-        ++ctx_->stats().aborted_by_index_node_conflict_count;
+      if (StaticConfig::kCollectExtraCommitStats &&
+          (db->is_tbl_btree_index_unique(item->tbl) ||
+          db->is_tbl_btree_index_nonunique(item->tbl))) {
+        abort_reason_secondary_count_ = &ctx_->stats().aborted_by_index_node_conflict_count;
+        abort_reason_secondary_time_ = &ctx_->stats().aborted_by_index_node_conflict_time;
       }
       return false;
     }
@@ -174,9 +178,11 @@ bool Transaction<StaticConfig>::check_version() {
                     item->state == RowAccessState::kDelete ||
                     item->state == RowAccessState::kReadDelete);
       auto db = item->tbl->db();
-      if (db->is_tbl_btree_index_unique(item->tbl) ||
-          db->is_tbl_btree_index_nonunique(item->tbl)) {
-        ++ctx_->stats().aborted_by_index_node_conflict_count;
+      if (StaticConfig::kCollectExtraCommitStats &&
+          (db->is_tbl_btree_index_unique(item->tbl) ||
+          db->is_tbl_btree_index_nonunique(item->tbl))) {
+        abort_reason_secondary_count_ = &ctx_->stats().aborted_by_index_node_conflict_count;
+        abort_reason_secondary_time_ = &ctx_->stats().aborted_by_index_node_conflict_time;
       }
       return false;
     }
@@ -484,6 +490,10 @@ bool Transaction<StaticConfig>::abort(bool skip_backoff) {
     if (StaticConfig::kCollectExtraCommitStats) {
       (*abort_reason_target_count_)++;
       (*abort_reason_target_time_) += diff;
+      if (abort_reason_secondary_count_ != nullptr) {
+        (*abort_reason_secondary_count_)++;
+        (*abort_reason_secondary_time_) += diff;
+      }
     } else {
       ctx_->stats().aborted_by_main_validation_count++;
       ctx_->stats().aborted_by_main_validation_time += diff;
