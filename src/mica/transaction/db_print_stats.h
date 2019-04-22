@@ -144,6 +144,11 @@ void DB<StaticConfig>::print_stats(double elapsed_time,
     printf("\n");
   }
 
+  if (StaticConfig::kInvestigateTicTocEffect) {
+    printf("$$$ validations succeeded thanks to TicToc effect: %" PRIu64 " (%6.2lf%% of all commits)\n\n",
+        stats.tictoc_effect_count, 100. * static_cast<double>(stats.tictoc_effect_count) / static_cast<double>(stats.committed_count));
+  }
+
   if (StaticConfig::kCollectCommitStats) {
     // printf("sum: %" PRIu64 " (us)\n", inter_commit_latency.sum());
     printf("inter-commit latency (us): min=%" PRIu64 ", max=%" PRIu64

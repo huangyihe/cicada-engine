@@ -12,6 +12,7 @@ Transaction<StaticConfig>::Transaction(Context<StaticConfig>* ctx)
   access_buckets_.resize(StaticConfig::kAccessBucketRootCount);
 
   consecutive_commits_ = 0;
+  tictoc_effect_ = false;
 }
 
 template <class StaticConfig>

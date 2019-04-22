@@ -68,6 +68,9 @@ struct Stats {
   uint64_t max_hash_index_chain_len;
   uint64_t max_gc_dealloc_chain_len;
 
+  // kInvestigateTicTocEffect
+  uint64_t tictoc_effect_count;
+
   Stats() { reset(); }
 
   void reset() { ::mica::util::memset(this, 0, sizeof(Stats)); }
@@ -120,6 +123,8 @@ struct Stats {
     return_rows_count += o.return_rows_count;
     gc_inc_count += o.gc_inc_count;
     gc_forced_count += o.gc_forced_count;
+
+    tictoc_effect_count += o.tictoc_effect_count;
 
     max_read_chain_len = std::max(max_read_chain_len, o.max_read_chain_len);
     max_write_chain_len = std::max(max_write_chain_len, o.max_write_chain_len);

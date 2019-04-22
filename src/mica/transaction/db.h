@@ -160,6 +160,9 @@ struct BasicDBConfig {
 
   // Show verbose messages.
   static constexpr bool kVerbose = false;
+
+  // Investigate potential gains from the "TicToc effect" by MVCC
+  static constexpr bool kInvestigateTicTocEffect = true;
 };
 
 template <class StaticConfig = BasicDBConfig>

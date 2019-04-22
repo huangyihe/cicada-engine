@@ -76,6 +76,7 @@ bool Transaction<StaticConfig>::begin(bool peek_only,
   wset_size_ = 0;
 
   access_bucket_count_ = 0;
+  tictoc_effect_ = false;
 
   if (StaticConfig::kVerbose) printf("begin: ts=%" PRIu64 "\n", ts_.t2);
 
@@ -142,10 +143,21 @@ bool Transaction<StaticConfig>::check_version() {
       continue;
 
     auto rv = item->newer_rv->older_rv;
-    if (item->write_rv == nullptr)
-      locate<true, false, true>(item->newer_rv, rv);
-    else
-      locate<true, true, true>(item->newer_rv, rv);
+    if (StaticConfig::kInvestigateTicTocEffect) {
+      // Start version chain traversal from the head if we
+      // are looking for TicToc effect
+      RowCommon<StaticConfig>* head = item->tbl->head(item->cf_id, item->row_id);
+      rv = head->older_rv;
+      if (item->write_rv == nullptr)
+        locate<true, false, true>(head, rv);
+      else
+        locate<true, true, true>(head, rv);
+    } else {
+      if (item->write_rv == nullptr)
+        locate<true, false, true>(item->newer_rv, rv);
+      else
+        locate<true, true, true>(item->newer_rv, rv);
+    }
     if (rv == nullptr) {
       if (StaticConfig::kReserveAfterAbort)
         reserve(item->tbl, item->cf_id, item->row_id,
@@ -169,6 +181,14 @@ bool Transaction<StaticConfig>::check_version() {
                     item->state == RowAccessState::kDelete ||
                     item->state == RowAccessState::kReadDelete);
       return false;
+    }
+
+    if (StaticConfig::kInvestigateTicTocEffect) {
+      // locate_depth_ is set by the Transaction::locate() method
+      if ((item->read_depth != 0) && (item->read_depth != locate_depth_)) {
+        if (!tictoc_effect_)
+            tictoc_effect_ = true;
+      }
     }
   }
   return true;
@@ -324,6 +344,10 @@ bool Transaction<StaticConfig>::commit(Result* detail,
     update_rts();
   }
 
+  if (StaticConfig::kInvestigateTicTocEffect) {
+    tictoc_effect_ = false;
+  }
+
   {
     t.switch_to(&Stats::main_validation);
     if (StaticConfig::kVerbose)
@@ -338,6 +362,12 @@ bool Transaction<StaticConfig>::commit(Result* detail,
       abort();
       if (detail != nullptr) *detail = Result::kAbortedByMainValidation;
       return false;
+    }
+  }
+
+  if (StaticConfig::kInvestigateTicTocEffect) {
+    if (tictoc_effect_) {
+      ++ctx_->stats().tictoc_effect_count;
     }
   }
 

@@ -59,7 +59,8 @@ class Transaction {
       (void)cf_id;
       if (src != nullptr && dest->data_size != 0) {
         assert(dest->data_size >= src->data_size);
-        ::mica::util::memcpy(dest->data, src->data, src->data_size);
+        //::mica::util::memcpy(dest->data, src->data, src->data_size);
+        memcpy(dest->data, src->data, src->data_size);
       }
       return true;
     };
@@ -187,6 +188,10 @@ class Transaction {
     bool write_hint;
   };
   std::vector<ReserveItem> to_reserve_;
+
+  // Used to investigate the "TicToc effect"
+  uint32_t locate_depth_;
+  bool tictoc_effect_;
 };
 }
 }

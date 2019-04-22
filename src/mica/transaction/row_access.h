@@ -288,6 +288,9 @@ struct RowAccessItem {
   RowVersion<StaticConfig>* write_rv;
   RowVersion<StaticConfig>* read_rv;
 
+  // Chain depth when observed
+  uint32_t read_depth;
+
   // typename StaticConfig::Timestamp latest_wts;
 };
 }

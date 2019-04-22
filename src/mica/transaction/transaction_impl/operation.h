@@ -120,7 +120,7 @@ bool Transaction<StaticConfig>::new_row(RAH& rah, Table<StaticConfig>* tbl,
   accesses_[access_size_] = {access_size_, 0,     RowAccessState::kNew,
                              tbl,          cf_id, row_id,
                              head,         head,  write_rv,
-                             nullptr /*, ts_*/};
+                             nullptr, 0 /*, ts_*/};
   access_size_++;
 
   return true;
@@ -283,7 +283,8 @@ bool Transaction<StaticConfig>::peek_row(RAH& rah, Table<StaticConfig>* tbl,
                              head,
                              newer_rv,
                              nullptr,
-                             rv /*, latest_wts */};
+                             rv,
+                             this->locate_depth_ /*, latest_wts */};
   access_size_++;
 
   return true;
@@ -499,6 +500,9 @@ void Transaction<StaticConfig>::locate(RowCommon<StaticConfig>*& newer_rv,
 
   uint64_t chain_len;
   if (StaticConfig::kCollectProcessingStats) chain_len = 0;
+  if (StaticConfig::kInvestigateTicTocEffect) {
+    locate_depth_ = 0;
+  }
 
   while (true) {
     // This usually should not happen because (1) a new row that can have no new
@@ -514,6 +518,9 @@ void Transaction<StaticConfig>::locate(RowCommon<StaticConfig>*& newer_rv,
     }
 
     if (StaticConfig::kCollectProcessingStats) chain_len++;
+    if (StaticConfig::kInvestigateTicTocEffect) {
+        ++locate_depth_;
+    }
 
     if (rv->wts < ts_) {
       RowVersionStatus status;
@@ -650,6 +657,11 @@ bool Transaction<StaticConfig>::insert_version_deferred() {
                       item->state == RowAccessState::kReadDelete,
                   true);
         return false;
+      }
+      if (StaticConfig::kInvestigateTicTocEffect) {
+        // To account for our own inserted pending version
+        if (item->read_depth != 0)
+          ++item->read_depth;
       }
       break;
     }
