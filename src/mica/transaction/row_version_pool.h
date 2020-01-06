@@ -240,6 +240,7 @@ class RowVersionPool {
     if (StaticConfig::kVerbose) printf("allocate\n");
 
     uint8_t numa_id = ctx_->numa_id();
+    /*
     State* state = nullptr;
 
     // printf("1\n");
@@ -274,16 +275,24 @@ class RowVersionPool {
     // If this fails, something like GC has written to an already deallocated
     // RowVersion to modify its older_rv.
     assert(state->rv != nullptr);
+    */
 
-    auto rv = state->rv;
-    state->rv = rv->older_rv;
-    state->current_free_count--;
+    auto rv = (RowVersion<StaticConfig>*)malloc(SharedRowVersionPool<StaticConfig>::class_to_rv_size(cls));
+    if (rv == nullptr) {
+      return nullptr;
+    }
+    //state->rv = rv->older_rv;
+    //state->current_free_count--;
 
-    __builtin_prefetch(state->rv, 1, 3);
+    //__builtin_prefetch(state->rv, 1, 3);
 
-    assert(rv->status == RowVersionStatus::kInvalid);
-    assert(rv->numa_id == numa_id);
-    assert(rv->size_cls == cls);
+    rv->older_rv = nullptr;
+    rv->status = RowVersionStatus::kInvalid;
+    rv->numa_id = numa_id;
+    rv->size_cls = cls;
+    //assert(rv->status == RowVersionStatus::kInvalid);
+    //assert(rv->numa_id == numa_id);
+    //assert(rv->size_cls == cls);
 
     return rv;
   }
@@ -292,7 +301,8 @@ class RowVersionPool {
     Timing t(ctx_->timing_stack(), &Stats::dealloc);
 
     if (StaticConfig::kVerbose) printf("deallocate\n");
-
+    free(rv);
+#if 0
     assert(rv != nullptr);
 
     assert(!StaticConfig::kInlinedRowVersion ||
@@ -327,6 +337,7 @@ class RowVersionPool {
         return_rows(numa_id, cls, false);
       }
     }
+#endif
   }
 
   uint64_t total_count(uint16_t cls) const {
