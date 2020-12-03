@@ -182,8 +182,8 @@ class BTreeIndex {
     }
   };
 
-  static constexpr size_t kInternalNodeMaxCount =
-      (1024 - 40 - 40) / (sizeof(Key) + sizeof(uint64_t));
+  static constexpr size_t kInternalNodeMaxCount = 15;
+  //    (1024 - 40 - 40) / (sizeof(Key) + sizeof(uint64_t));
   typedef InternalNodeT<kInternalNodeMaxCount> InternalNode;
   typedef InternalNodeT<kInternalNodeMaxCount * 2 + 1> InternalNodeBuffer;
 
@@ -228,8 +228,8 @@ class BTreeIndex {
     }
   };
 
-  static constexpr size_t kLeafNodeMaxCount =
-      (1024 - 40 - 40) / (sizeof(Key) + (HasValue ? sizeof(uint64_t) : 0));
+  static constexpr size_t kLeafNodeMaxCount = 15;
+  //    (1024 - 40 - 40) / (sizeof(Key) + (HasValue ? sizeof(uint64_t) : 0));
   typedef LeafNodeT<kLeafNodeMaxCount> LeafNode;
   typedef LeafNodeT<kLeafNodeMaxCount * 2> LeafNodeBuffer;
 
