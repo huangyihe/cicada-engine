@@ -3,6 +3,7 @@
 #define MICA_TRANSACTION_PAGE_POOL_H_
 
 #include <cstdio>
+#include <stdexcept>
 #include "mica/util/lcore.h"
 
 namespace mica {
@@ -16,6 +17,9 @@ class PagePool {
 
   PagePool(Alloc* alloc, uint64_t size, uint8_t numa_id)
       : alloc_(alloc), numa_id_(numa_id) {
+    if (numa_id >= ::mica::util::lcore.numa_count()) {
+      throw std::runtime_error("Invalid numa_id.");
+    }
     uint64_t page_count = (size + kPageSize - 1) / kPageSize;
     size_ = page_count * kPageSize;
 
@@ -23,10 +27,21 @@ class PagePool {
     total_count_ = page_count;
     free_count_ = page_count;
 
+    size_t lowest_lcore_in_numa_node = 0;
+    while (::mica::util::lcore.numa_id(lowest_lcore_in_numa_node) !=
+             size_t(numa_id)) {
+      ++lowest_lcore_in_numa_node;
+      if (lowest_lcore_in_numa_node >= ::mica::util::lcore.lcore_count()) {
+        throw std::runtime_error("mica::util::lcore internal error.");
+      }
+    }
+
     pages_ =
-        reinterpret_cast<char*>(alloc_->malloc_contiguous(size_, numa_id_));
+        reinterpret_cast<char*>(
+          alloc_->malloc_contiguous(size_, lowest_lcore_in_numa_node));
     if (!pages_) {
       printf("failed to initialize PagePool\n");
+      throw std::runtime_error("Failed to construct PagePool.");
       return;
     }
     for (uint64_t i = 0; i < page_count; i++)

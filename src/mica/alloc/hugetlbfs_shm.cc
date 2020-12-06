@@ -624,8 +624,10 @@ size_t HugeTLBFS_SHM::alloc(size_t length, size_t numa_node) {
   if (num_pages != num_allocated_pages) {
     fprintf(
         stderr,
-        "warning: insufficient memory on numa node %zu to allocate %zu bytes\n",
+        "warning: insufficient memory on numa node %zu to allocate %zu bytes:\n",
         numa_node, length);
+    fprintf(stderr, "  wanted %zu pages, got %zu pages\n", num_pages,
+            num_allocated_pages);
     // memset(&entries_[entry_id], 0, sizeof(entries_[entry_id]));
     entries_[entry_id].refcount = 0;
     entries_[entry_id].to_remove = false;
